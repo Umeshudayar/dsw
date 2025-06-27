@@ -199,7 +199,7 @@ def check_trigger_conditions(policy: Dict):
         Current Value: {policy['current_value']:.1f} {policy['unit']}
         Threshold: {policy['threshold']} {policy['unit']}
         Customer: {policy['customer']}
-        Calculated Payout: ${payout:,}
+        Calculated Payout: ₹{payout:,}
         
         Provide analysis and payout decision."""
         
@@ -218,42 +218,178 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Sidebar
+
+# Fixed Policy Selection with proper error handling
 with st.sidebar:
     st.header("🎛️ Control Panel")
     
-    # Policy Selection
-    policy_options = [f"{p['id']} - {p['type']}" for p in st.session_state.policies]
-    selected_idx = st.selectbox("Select Policy", range(len(policy_options)), format_func=lambda x: policy_options[x])
-    st.session_state.selected_policy = st.session_state.policies[selected_idx]
+    # Policy Selection - Fixed
+    if 'policies' in st.session_state and st.session_state.policies:
+        policy_options = [f"{p['id']} - {p['type']}" for p in st.session_state.policies]
+        
+        # Use direct selectbox with options instead of indices
+        selected_policy_str = st.selectbox(
+            "Select Policy", 
+            options=policy_options,
+            index=0  # Default to first policy
+        )
+        
+        # Find the selected policy by matching the string
+        selected_idx = policy_options.index(selected_policy_str)
+        st.session_state.selected_policy = st.session_state.policies[selected_idx]
+        
+        st.divider()
+        
+        # Real-time Controls
+        st.subheader("📡 Real-time Monitoring")
+        
+        auto_update = st.checkbox("Auto-update Parameters", value=False)
+        if auto_update:
+            if st.button("🔄 Update Now"):
+                update_parameters()
+                st.rerun()
+        
+        # Manual parameter adjustment
+        st.subheader("🎚️ Manual Parameter Control")
+        
+        # Get current policy safely
+        if 'selected_policy' in st.session_state:
+            policy = st.session_state.selected_policy
+            
+            # Parameter-specific sliders with proper key management
+            if policy['parameter'] == 'rainfall':
+                new_value = st.slider(
+                    "Rainfall (mm/month)", 
+                    min_value=0.0, 
+                    max_value=100.0, 
+                    value=float(policy['current_value']), 
+                    step=0.1,
+                    key=f"rainfall_slider_{policy['id']}"
+                )
+            elif policy['parameter'] == 'delay_minutes':
+                new_value = st.slider(
+                    "Delay (minutes)", 
+                    min_value=0.0, 
+                    max_value=400.0, 
+                    value=float(policy['current_value']), 
+                    step=1.0,
+                    key=f"delay_slider_{policy['id']}"
+                )
+            elif policy['parameter'] == 'earthquake_magnitude':
+                new_value = st.slider(
+                    "Earthquake Magnitude", 
+                    min_value=0.0, 
+                    max_value=10.0, 
+                    value=float(policy['current_value']), 
+                    step=0.1,
+                    key=f"earthquake_slider_{policy['id']}"
+                )
+            else:
+                st.error(f"Unknown parameter type: {policy['parameter']}")
+                new_value = policy['current_value']
+            
+            # Update button with proper state management
+            if st.button("Update Parameter", key=f"update_btn_{policy['id']}"):
+                # Update the specific policy in session state
+                for i, p in enumerate(st.session_state.policies):
+                    if p['id'] == policy['id']:
+                        st.session_state.policies[i]['current_value'] = new_value
+                        break
+                
+                # Force refresh to show updated values
+                st.rerun()
+        
+        else:
+            st.error("No policy selected. Please check your session state.")
     
-    st.divider()
-    
-    # Real-time Controls
-    st.subheader("📡 Real-time Monitoring")
-    
-    auto_update = st.checkbox("Auto-update Parameters", value=False)
-    if auto_update:
-        if st.button("🔄 Update Now"):
-            update_parameters()
-            st.rerun()
-    
-    # Manual parameter adjustment
-    st.subheader("🎚️ Manual Parameter Control")
-    policy = st.session_state.selected_policy
-    
-    if policy['parameter'] == 'rainfall':
-        new_value = st.slider("Rainfall (mm/month)", 0.0, 100.0, policy['current_value'], 0.1)
-    elif policy['parameter'] == 'delay_minutes':
-        new_value = st.slider("Delay (minutes)", 0.0, 400.0, policy['current_value'], 1.0)
-    elif policy['parameter'] == 'earthquake_magnitude':
-        new_value = st.slider("Earthquake Magnitude", 0.0, 10.0, policy['current_value'], 0.1)
-    
-    if st.button("Update Parameter"):
-        for i, p in enumerate(st.session_state.policies):
-            if p['id'] == policy['id']:
-                st.session_state.policies[i]['current_value'] = new_value
-        st.rerun()
+    else:
+        st.error("No policies found. Please initialize policies in session state.")
 
+# Alternative approach - more robust policy selection
+def get_policy_selection_robust():
+    """More robust policy selection with better error handling"""
+    
+    if 'policies' not in st.session_state or not st.session_state.policies:
+        st.error("No policies available")
+        return None
+    
+    # Create policy display options
+    policy_display = {}
+    for i, policy in enumerate(st.session_state.policies):
+        display_name = f"{policy['id']} - {policy['type']}"
+        policy_display[display_name] = i
+    
+    # Selectbox with string options
+    selected_display = st.selectbox(
+        "Select Policy",
+        options=list(policy_display.keys()),
+        key="policy_selector"
+    )
+    
+    if selected_display:
+        policy_idx = policy_display[selected_display]
+        return st.session_state.policies[policy_idx]
+    
+    return None
+
+# Usage of the robust function
+def sidebar_with_robust_selection():
+    with st.sidebar:
+        st.header("🎛️ Control Panel")
+        
+        # Get selected policy
+        selected_policy = get_policy_selection_robust()
+        
+        if selected_policy:
+            st.session_state.selected_policy = selected_policy
+            
+            st.divider()
+            
+            # Rest of your sidebar code here...
+            st.subheader("📡 Real-time Monitoring")
+            
+            auto_update = st.checkbox("Auto-update Parameters", value=False)
+            
+            # Manual parameter control
+            st.subheader("🎚️ Manual Parameter Control")
+            
+            # Use unique keys for each slider to prevent conflicts
+            param_type = selected_policy['parameter']
+            policy_id = selected_policy['id']
+            current_val = selected_policy['current_value']
+            
+            if param_type == 'rainfall':
+                new_value = st.slider(
+                    "Rainfall (mm/month)",
+                    0.0, 100.0, 
+                    float(current_val),
+                    0.1,
+                    key=f"slider_rainfall_{policy_id}"
+                )
+            elif param_type == 'delay_minutes':
+                new_value = st.slider(
+                    "Delay (minutes)",
+                    0.0, 400.0,
+                    float(current_val),
+                    1.0,
+                    key=f"slider_delay_{policy_id}"
+                )
+            elif param_type == 'earthquake_magnitude':
+                new_value = st.slider(
+                    "Earthquake Magnitude",
+                    0.0, 10.0,
+                    float(current_val),
+                    0.1,
+                    key=f"slider_earthquake_{policy_id}"
+                )
+            
+            if st.button("Update Parameter", key=f"update_{policy_id}"):
+                # Update the policy
+                for i, policy in enumerate(st.session_state.policies):
+                    if policy['id'] == policy_id:
+                        st.session_state.policies[i]['current_value'] = new_value
+                        break
+                st.rerun()
 # Main Content
 col1, col2 = st.columns([2, 1])
 
@@ -269,8 +405,8 @@ with col1:
         <h3>🏷️ {policy['id']} - {policy['type']}</h3>
         <p><strong>Customer:</strong> {policy['customer']}</p>
         <p><strong>Location:</strong> {policy['location']}</p>
-        <p><strong>Coverage:</strong> ${policy['coverage']:,}</p>
-        <p><strong>Premium:</strong> ${policy['premium']:,}</p>
+        <p><strong>Coverage:</strong> ₹{policy['coverage']:,}</p>
+        <p><strong>Premium:</strong> ₹{policy['premium']:,}</p>
         <p><strong>Parameter:</strong> {policy['parameter']} (Threshold: {policy['threshold']} {policy['unit']})</p>
     </div>
     """, unsafe_allow_html=True)
@@ -310,7 +446,7 @@ with col1:
         payout_amount = calculate_payout(policy)
         st.metric(
             label="Potential Payout",
-            value=f"${payout_amount:,}",
+            value=f"₹{payout_amount:,}",
             delta="Auto-calculated"
         )
     
@@ -395,7 +531,7 @@ with col2:
         <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; margin: 0.5rem 0; border-left: 4px solid #28a745;">
             <strong>{claim['policy']}</strong> {status_emoji}<br>
             <small>{claim['trigger']}</small><br>
-            <span style="color: #28a745; font-weight: bold;">${claim['amount']:,}</span> | {claim['date']}
+            <span style="color: #28a745; font-weight: bold;">₹{claim['amount']:,}</span> | {claim['date']}
         </div>
         """, unsafe_allow_html=True)
     
@@ -410,11 +546,11 @@ with col2:
     
     with col_stat1:
         st.metric("Active Policies", len(st.session_state.policies))
-        st.metric("Total Coverage", f"${total_coverage:,}")
+        st.metric("Total Coverage", f"₹{total_coverage:,}")
     
     with col_stat2:
         st.metric("Claims Processed", len(st.session_state.claim_history))
-        st.metric("Total Payouts", f"${total_payouts:,}")
+        st.metric("Total Payouts", f"₹{total_payouts:,}")
 
 # Footer
 st.divider()
