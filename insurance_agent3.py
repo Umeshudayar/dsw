@@ -273,42 +273,24 @@ if 'ai_analysis' not in st.session_state:
 
 # Helper functions
 def get_ollama_response(prompt: str) -> str:
-    """Get AI response from Ollama local model"""
+    """Get AI response from Ollama local model with better error handling"""
     try:
-        # Ollama API endpoint
         url = "http://localhost:11434/api/generate"
-        
         data = {
-            "model": "llama3.1:8b",
+            "model": "phi3.5:3.8b",
             "prompt": prompt,
             "stream": False
         }
-        
-        response = requests.post(url, json=data)
+        response = requests.post(url, json=data, timeout=10)
         
         if response.status_code == 200:
             result = response.json()
             return result.get('response', 'Analysis completed.')
         else:
-            return f"**AI Model Analysis**\n\nLocal AI model detected parametric condition. Current parameter value requires immediate attention. Please ensure Ollama is running with: `ollama serve`"
+            return "**AI Analysis (Demo Mode)**: Local AI model unavailable. Using rule-based assessment. Start Ollama with: `ollama serve`"
     
     except Exception as e:
-        # Fallback for demo
-        policy = st.session_state.selected_policy
-        parameter = policy['parameter']
-        current = policy['current_value']
-        threshold = policy['threshold']
-        
-        # Determine trigger condition based on parameter type
-        if parameter in ['rainfall', 'solar_irradiance']:
-            triggered = current < threshold
-        else:
-            triggered = current > threshold
-            
-        if triggered:
-            return f"**AI Risk Assessment**: {parameter.replace('_', ' ').title()} value of {current:.1f} {policy['unit']} has triggered the parametric condition (threshold: {threshold} {policy['unit']}). **AUTOMATIC PAYOUT AUTHORIZED**"
-        else:
-            return f"**AI Risk Assessment**: {parameter.replace('_', ' ').title()} value of {current:.1f} {policy['unit']} is within acceptable parameters. Threshold: {threshold} {policy['unit']}. Continuing real-time monitoring."
+        return "**AI Analysis (Demo Mode)**: Local AI model unavailable. Using rule-based assessment. Start Ollama with: `ollama serve`"
 
 def calculate_payout(policy: Dict) -> int:
     """Calculate payout based on parameter severity"""
@@ -417,21 +399,40 @@ with st.sidebar:
         filtered_policies = [p for p in st.session_state.policies if p['category'] == selected_category]
     
     # Policy Selection
-    policy_options = [f"{p['id']} - {p['type']}" for p in filtered_policies]
-    selected_idx = st.selectbox("Select Policy", range(len(policy_options)), 
-                               format_func=lambda x: policy_options[x])
-    st.session_state.selected_policy = filtered_policies[selected_idx]
+    if filtered_policies:
+        policy_options = [f"{p['id']} - {p['type']}" for p in filtered_policies]
+        selected_idx = st.selectbox("Select Policy", range(len(policy_options)), 
+                                   format_func=lambda x: policy_options[x])
+        st.session_state.selected_policy = filtered_policies[selected_idx]
+    else:
+        st.warning("No policies match the selected criteria")
+        st.session_state.selected_policy = st.session_state.policies[0]
+
     
     st.divider()
     
     # Real-time Controls
     st.subheader("Real-time Monitoring")
     
+    if 'last_update' not in st.session_state:
+        st.session_state.last_update = time.time()
+
     auto_update = st.checkbox("Auto-update Parameters", value=False)
+    
     if auto_update:
-        if st.button("Update All Parameters"):
+        current_time = time.time()
+        if current_time - st.session_state.last_update > 10:
             update_parameters()
+            st.session_state.last_update = current_time
             st.rerun()
+        
+        next_update = 10 - int(current_time - st.session_state.last_update)
+        st.info(f"Next update in: {max(0, next_update)}s")
+    
+    if st.button("Update All Parameters Now"):
+        update_parameters()
+        st.session_state.last_update = time.time()
+        st.rerun()
     
     # Manual parameter adjustment
     st.subheader("Manual Parameter Control")
@@ -451,18 +452,28 @@ with st.sidebar:
     }
     
     param = policy['parameter']
-    if param in parameter_configs:
-        config = parameter_configs[param]
-        new_value = st.slider(
-            f"{param.replace('_', ' ').title()} ({policy['unit']})",
-            config['min'], config['max'], policy['current_value'], config['step']
-        )
+if param in parameter_configs:
+    config = parameter_configs[param]
+    # Ensure current_value is a number, not a list
+    current_val = policy['current_value']
+    if isinstance(current_val, (list, tuple)):
+        current_val = float(current_val[0]) if current_val else config['min']
+    else:
+        current_val = float(current_val)
     
-    if st.button("Update Parameter"):
-        for i, p in enumerate(st.session_state.policies):
-            if p['id'] == policy['id']:
-                st.session_state.policies[i]['current_value'] = new_value
-        st.rerun()
+    new_value = st.slider(
+        f"{param.replace('_', ' ').title()} ({policy['unit']})",
+        config['min'], config['max'], current_val, config['step']
+    )
+
+if st.button("Update Parameter"):
+    if 'new_value' in locals() and new_value != current_val:
+            for i, p in enumerate(st.session_state.policies):
+                if p['id'] == policy['id']:
+                    st.session_state.policies[i]['current_value'] = new_value
+                    break
+            st.success(f"Parameter updated to {new_value}")
+            st.rerun()
 
 # Main Content
 col1, col2 = st.columns([2, 1])
@@ -614,12 +625,20 @@ with col2:
     # AI Analysis Panel
     st.header("AI Risk Analysis")
     
+    if 'ai_analysis' not in st.session_state:
+        st.session_state.ai_analysis = ""
+
     if st.session_state.ai_analysis:
-        alert_class = "danger-alert" if "PAYOUT" in st.session_state.ai_analysis.upper() else "success-alert"
+        if any(keyword in st.session_state.ai_analysis.upper() for keyword in ["PAYOUT", "TRIGGER", "AUTHORIZED"]):
+            alert_class = "danger-alert"
+        else:
+            alert_class = "success-alert"
+        
         st.markdown(f"""
         <div class="{alert_class}">
-            <h4>Latest Analysis</h4>
-            {st.session_state.ai_analysis}
+            <h4>Latest AI Analysis</h4>
+            {st.session_state.ai_analysis.replace('\n', '<br>')}
+            <br><small>Updated: {datetime.now().strftime('%H:%M:%S')}</small>
         </div>
         """, unsafe_allow_html=True)
     else:
